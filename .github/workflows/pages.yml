@@ -1,0 +1,61 @@
+name: Deploy knowledge base to GitHub Pages
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render and verify site
+        run: |
+          python3 tools/build_site.py
+          git diff --exit-code -- '*.html'
+          python3 tools/check_site.py
+          node --check assets/app.js
+          node --check assets/labs.js
+          node tools/test_labs.cjs
+      - name: Compile and test teaching examples
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1
+        run: |
+          mkdir -p build
+          clang -std=c11 -Wall -Wextra -Wpedantic -Werror -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer examples/log_lab.c -o build/log_lab
+          clang -std=c11 -Wall -Wextra -Wpedantic -Werror -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer examples/memory_demo.c -o build/memory_demo
+          ./build/memory_demo
+          python3 examples/test_lab.py build/log_lab
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: verify
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - name: Prepare public website only
+        run: |
+          mkdir -p _site
+          cp index.html c-memory.html binary-logging.html debugging.html _site/
+          cp -R assets examples _site/
+          touch _site/.nojekyll
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
