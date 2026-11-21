@@ -67,6 +67,6 @@ Memory 練習另編譯 `examples/memory_demo.c`。Sanitizer 支援依平台而�
 
 ## GitHub Pages
 
-在 Settings → Pages 將 Source 設為 **GitHub Actions**。Push 至 `main` 會先執行網站與 C 範例驗證，再部署；PR 只驗證。Workflow 也可手動執行。
+在 Settings → Pages 將 Source 設為 **GitHub Actions**。Push 至 `main` 會先驗證網站與 C 範例並上傳網站產物，再由獨立的工作部署到 Pages；PR 只驗證。Workflow 也可手動執行。
 
 僅五個根目錄 HTML、`assets/` 與 `examples/` 會發布；不打包 `.git`、build 產物或整個 repo。所有內部路徑為相對路徑，支援 repository Pages 子路徑。

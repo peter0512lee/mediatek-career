@@ -33,6 +33,17 @@ jobs:
           clang -std=c11 -Wall -Wextra -Wpedantic -Werror -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer examples/memory_demo.c -o build/memory_demo
           ./build/memory_demo
           python3 examples/test_lab.py build/log_lab
+      - name: Prepare public website only
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p _site
+          cp index.html c-memory.html embedded-systems.html binary-logging.html debugging.html _site/
+          cp -R assets examples _site/
+          touch _site/.nojekyll
+      - uses: actions/upload-pages-artifact@v5
+        if: github.event_name != 'pull_request'
+        with:
+          path: _site
   deploy:
     if: github.event_name != 'pull_request'
     needs: verify
@@ -45,17 +56,7 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
-      - name: Prepare public website only
-        run: |
-          mkdir -p _site
-          cp index.html c-memory.html embedded-systems.html binary-logging.html debugging.html _site/
-          cp -R assets examples _site/
-          touch _site/.nojekyll
-      - uses: actions/upload-pages-artifact@v4
-        with:
-          path: _site
       - name: Deploy
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
