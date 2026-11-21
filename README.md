@@ -6,6 +6,8 @@
 
 ## 完整學習路線
 
+要先做 Modem Logging 練習，可從首頁的[中文教材](index.html#chinese-materials)開始：依序補 C 指標與記憶體、二進位解碼、串流除錯與 RTOS。5G 架構另列為補讀。
+
 1. **Modem 基礎**（`index.html`）：AP / Modem、UE / RAN / Core、協定分層、5G SA 概念流程、名詞搜尋。
 2. **C 與記憶體**（`c-memory.html`）：編譯、pointer / length、ownership、生命週期、endianness、alignment、並行邊界、copy 實驗。
 3. **[嵌入式系統](embedded-systems.html)**：Cortex-M 啟動與記憶體配置、MMIO、周邊、ISR、DMA、RTOS，以及不用硬體的時序練習。
