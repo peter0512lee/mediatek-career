@@ -10,8 +10,9 @@ PAGES = [
     ('c-memory.html', '02', 'C 與記憶體', '讓每一個 byte，<br>都有清楚的<em>邊界</em>。', '從 pointer、生命週期到同步，建立閱讀 C logging 程式的基礎。', '2026-11-08'),
     ('embedded-systems.html', '03', '嵌入式系統', '從開機到事件，<br>讀懂<em>韌體</em>。', '從開機、周邊到 RTOS，練習追蹤一筆事件何時發生、何時完成。', '2026-11-21'),
     ('rtos-advanced.html', '04', 'RTOS 進階', '從排程與鎖，<br>算出<em>時間上界</em>。', '進階理解搶占、優先權反轉、ISR 交接與反應時間分析，再用 trace 檢查真機行為。', '2026-11-21'),
-    ('binary-logging.html', '05', 'Binary Logging', '跟著一筆 log，<br>看懂<em>資料的旅程</em>。', '定義格式、解析 bytes、觀察 queue，再親手執行一個小型 logger。', '2026-11-08'),
-    ('debugging.html', '06', 'Debugging 實作', '把問題縮小，<br>讓<em>證據</em>帶路。', '從重現、觀察到驗證，建立能應用在 Logging Service 的除錯方法。', '2026-11-08'),
+    ('packets-data-structures.html', '05', '封包與資料結構', '一筆 log，<br>在哪裡<em>分界</em>？', '分清記憶體、傳輸與讀取的邊界，再用陣列、佇列和 ring buffer 追一筆 log。', '2026-11-21'),
+    ('binary-logging.html', '06', 'Binary Logging', '跟著一筆 log，<br>看懂<em>資料的旅程</em>。', '定義格式、解析 bytes、觀察 queue，再親手執行一個小型 logger。', '2026-11-08'),
+    ('debugging.html', '07', 'Debugging 實作', '把問題縮小，<br>讓<em>證據</em>帶路。', '從重現、觀察到驗證，建立能應用在 Logging Service 的除錯方法。', '2026-11-08'),
 ]
 
 def course_nav(current):

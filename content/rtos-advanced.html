@@ -66,7 +66,7 @@ python3 examples/rtos_response_time.py 600</code></pre>
     <li><strong>找等待原因：</strong>Ready 到首次切入長，查當時執行的 task 與 ISR；blocked on lock 長，查 owner、鎖持有時間與搶占；queue 高水位和丟棄數上升，再比對 burst 和 consumer 是否被 I/O 拖慢。Trace 本身若丟事件，標記資料缺口，不從缺段定根因。</li>
     <li><strong>同看 RAM：</strong>根據目標負載檢查 task stack、queue 容量與 pool 餘量。上游 FreeRTOS 的 stack high-water mark 是測到的歷史最少剩餘 stack 空間（以 stack words 計），不是已用 bytes；未跑到的最深 call path 仍未驗證。<a href="#ref-stack">[S]</a></li>
   </ul>
-  <p>Zephyr 3.7.0 的 tracing 指南示範從 kernel hooks 選格式與傳輸。先用低成本的事件記錄重現高負載，並估計 instrumentation overhead；真機觀測到的最大值仍不等於已證明的 WCET。<a href="#ref-zephyr-trace">[T]</a> 下一章<a href="binary-logging.html">Binary Logging</a>討論如何保存與解析這些紀錄。</p>
+  <p>Zephyr 3.7.0 的 tracing 指南示範從 kernel hooks 選格式與傳輸。先用低成本的事件記錄重現高負載，並估計 instrumentation overhead；真機觀測到的最大值仍不等於已證明的 WCET。<a href="#ref-zephyr-trace">[T]</a> 下一章<a href="packets-data-structures.html">封包與資料結構</a>先分清紀錄與傳輸邊界，再練習用佇列交接資料。</p>
 </section>
 <section id="resources">
   <div class="section-kicker">07 / PUBLIC LEARNING PATH</div>

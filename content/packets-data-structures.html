@@ -1,0 +1,88 @@
+<section id="layers">
+  <div class="section-kicker">01 / NAME THE BOUNDARY</div>
+  <h2>先問「封包」是哪一層的資料。</h2>
+  <p>讀 logging service 時，同樣叫 <code>packet</code> 的東西可能是記憶體物件、已編碼的 log record，或真正的網路封包。先查函式在哪一層、收什麼、傳給誰；不要從變數名稱猜格式。</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th scope="col">你看到什麼</th><th scope="col">它的邊界由誰定義？</th></tr></thead>
+    <tbody>
+      <tr><td>C <code>struct</code> 或 descriptor</td><td>程式內的欄位、型別與生命週期。指標可指向 buffer，但指標值不是 buffer 的內容。</td></tr>
+      <tr><td>Log record／應用層訊息</td><td>編碼器與解碼器約定的欄位、長度、byte order 與版本。它不必剛好裝進一個網路封包。</td></tr>
+      <tr><td>TCP segment／UDP datagram</td><td>傳輸層。TCP segment 是承載 byte stream 的傳輸單位；UDP datagram 是 UDP 的訊息單位。</td></tr>
+      <tr><td>IP packet／鏈路 frame</td><td>IP packet 有網路層地址；在 Ethernet 上，IP packet（或其片段）再放入鏈路 frame。</td></tr>
+      <tr><td>I/O chunk</td><td>一次 <code>read()</code> 或 callback 交給程式的 bytes，由 I/O 介面契約決定。它不是另一層協定。</td></tr>
+    </tbody>
+  </table></div>
+  <p>外層的 payload 可以包含內層的 header。假設用一個 UDP datagram 運送 18 bytes 的 LG v1 record：UDP payload 是整筆 18 bytes，UDP Length 是 8 + 18 = 26 bytes（不含 IP header）；LG v1 裡的 <code>payload_length</code> 卻只有 2 bytes。哪個長度正確，要先知道它屬於哪一層。<a href="#ref-beej">[B]</a> <a href="#ref-udp">[U]</a></p>
+</section>
+<section id="framing">
+  <div class="section-kicker">02 / STREAM VS MESSAGE</div>
+  <h2>TCP 保留位元組順序，不保留應用訊息邊界。</h2>
+  <ul>
+    <li><strong>Byte stream：</strong>TCP 提供可靠、有序的 byte stream。一個 <code>send()</code> 不對應一個接收端 <code>recv()</code>；兩筆 record 可能一起讀到，一筆也可能跨多次讀取。檔案或串列介面若以 byte stream 供讀取，也要自己找 record 邊界，但可靠性不一定跟 TCP 相同。<a href="#ref-tcp">[T]</a></li>
+    <li><strong>Datagram：</strong>UDP 保留到達的 datagram 邊界，但不保證送達、順序或不重複。接收 buffer 不夠時要依 socket API 判斷截斷；不能拿下一個 datagram 補前一個。每個 datagram 裝一筆、多筆，或由應用自己拆分，仍是格式設計。</li>
+  </ul>
+  <p><strong>Framing</strong> 是定義 record 從哪裡開始、在哪裡結束。固定長度好切但不適合所有 payload；分隔符（例如換行）需要規定 payload 內同一符號怎麼處理；長度前綴支援變長資料，但要明確寫下長度的單位、是否含 header、最大值與 byte order。<a href="#ref-beej">[B]</a></p>
+  <div class="note"><strong>Parser 的三種結果不能混在一起。</strong>收到完整且有效的 record，就消費該筆、保留剩餘資料；格式有效但尚未收齊，就等待更多 bytes；確定格式不合法則回報錯誤。對有限資料來源，要是 EOF 時還差 bytes，這是截斷，不是繼續等待。後續要停止或重新同步，必須看協定是否定義了做法。</div>
+</section>
+<section id="byte-layout">
+  <div class="section-kicker">03 / READ BYTES BY OFFSET</div>
+  <h2>看欄位契約，不靠 sizeof 猜線上格式。</h2>
+  <p>Hex 每兩個字元是一個 byte；offset 從 0 計。下列是 repo 的合成 LG v1 資料，換行只是標出 16-byte header 與 payload，不是資料內容：</p>
+  <pre><code>4c 47 01 02 02 00 01 00 01 00 00 00 e8 03 00 00
+34 12</code></pre>
+  <p>看 <a href="binary-logging.html#format">LG v1 欄位表</a>：offset 4 的 <code>02 00</code> 是 little-endian <code>payload_length = 2</code>。因此整筆占 18 bytes。Offset 16 的 <code>34 12</code> 是 payload；按這筆 event 的 schema 解成 <code>0x1234</code>，也就是 4660。UDP header 的多 byte 欄位是 network byte order（big-endian）；這不會改變 UDP payload 裡 LG v1 自己的 byte order。</p>
+  <p>讀欄位前確認<strong>實際已收到的長度</strong>；收到完整 header 後才使用它宣告的長度，並先檢查格式的上限。C <code>struct</code> 可能有 padding、alignment 與不同 ABI，不能單靠 <code>sizeof(struct)</code> 或把 buffer cast 成指標來讀取 wire format。<a href="c-memory.html#representation">複習 C 與記憶體：bytes 與 struct</a>。</p>
+  <details><summary>兩筆 record 是 18 與 17 bytes，三次讀到 7、20、8 bytes，何時能解完？</summary><p>第 1 次只有 7 bytes，連 header 都不夠。第 2 次累積 27 bytes，解完第一筆後保留 9 bytes。第 3 次加上 8 bytes，第二筆共 17 bytes，剛好消費完。這三次是 I/O 切塊，不是網路封包或 record 的邊界。</p></details>
+</section>
+<section id="structures">
+  <div class="section-kicker">04 / PICK BY OPERATION</div>
+  <h2>Queue 是使用規則，ring buffer 是實作方式。</h2>
+  <p>資料結構不只是在宣告欄位：要看最常做的操作、可用記憶體、資料大小與最慢路徑。例如 FIFO queue 要求「先進先出」；可以用環形陣列，也可以用 linked list。兩者讓呼叫端看到相同順序，實作成本卻不同。<a href="#ref-ods">[O]</a> <a href="#ref-opendsa">[Q]</a></p>
+  <div class="table-wrap"><table>
+    <thead><tr><th scope="col">結構</th><th scope="col">何時用在 logger</th><th scope="col">要付的成本</th></tr></thead>
+    <tbody>
+      <tr><td>Array</td><td>連續收 bytes；ID 連續且範圍小時，用索引查 event 資訊。</td><td>依索引存取 O(1)；中間插入若需保持順序，通常要搬元素。要分清已用長度與總容量。</td></tr>
+      <tr><td>固定容量 ring</td><td>按順序暫存待消費的 log 或 descriptor，不搬動剩餘元素。</td><td>固定大小 item 的索引操作 O(1)；資料複製仍取決於 item 大小。容量滿時要有策略。</td></tr>
+      <tr><td>Linked list</td><td>節點本來就在 pool 中，且手上已有要插入的位置，可用連結管理待處理項目。</td><td>已有前置節點時，單向串列的插入可 O(1)；定位第 n 個要走訪。每節點要付出 pointer 空間，並管理節點生命週期。</td></tr>
+      <tr><td>Hash table</td><td>由稀疏的 event ID 找 schema 或名稱。</td><td>良好雜湊與受控負載下，查詢通常期望 O(1)，但碰撞會增加工作。固定的小字典不一定需要 hash table。</td></tr>
+    </tbody>
+  </table></div>
+  <p>大 O 描述操作成本如何隨資料量成長，不是最壞延遲保證。特別要分開看搜尋、複製、記憶體配置與等鎖。若 queue 存的是 <code>{data, len}</code> descriptor，入列複製的是指標與長度，不會順便複製 payload；規定成功和失敗時由誰保有、歸還 buffer。<a href="c-memory.html#lifetime">複習 ownership</a>。</p>
+</section>
+<section id="ring">
+  <div class="section-kicker">05 / CHECK RING INVARIANTS</div>
+  <h2>陣列上的位置，不等於 FIFO 順序。</h2>
+  <p>本 repo 的四格單執行緒 ring：<code>head</code> 是下次寫的位置，<code>tail</code> 是下次讀的位置，<code>count</code> 是佇列內的 item 數。每次成功操作才推進對應的索引，走到陣列尾端就回到 0。從 <code>tail</code> 往前走 <code>count</code> 格，才是 FIFO 順序；不要從 slot 0 開始讀。專案若用相反的 head/tail 命名，以它自己的讀寫行為為準。</p>
+  <p><code>count == 0</code> 代表空，<code>count == 4</code> 代表滿；兩種情況都可能見到 <code>head == tail</code>。若採用 Linux 文件示範的留一格方案，四格陣列只能裝三筆，滿空公式也不同，不可混用。這裡教的是固定大小的槽位；若 ring 存的是變長 record 的原始 bytes，一筆還可能跨陣列末端，拆成兩段。<a href="#ref-ring">[R]</a></p>
+  <div class="note"><strong>回到 service：先寫下容量的單位。</strong>容量可能是 4 筆 descriptor、4 KiB 資料、或最多 4 個尚未歸還的 pool buffer，不能互換。滿載時查採用丟新、丟舊還是阻塞，並找出 drop 計數在哪裡更新。單執行緒 ring 不等於可在 ISR 或多核心直接共享的 queue。</div>
+</section>
+<section id="practice">
+  <div class="section-kicker">06 / FOLLOW ONE RECORD</div>
+  <h2>不用硬體，跑完 bytes 與 queue 兩個練習。</h2>
+  <ol>
+    <li><strong>分辨「缺資料」與「格式錯誤」。</strong>開啟 <a href="binary-logging.html#bytes">互動 Hex Decoder</a>，解正常範例，再按「載入截斷範例」；前者應顯示 4660，後者應顯示 <code>NEED_MORE</code>。接著還原並把 offset 4～5 的 <code>02 00</code> 改為 <code>00 02</code>，再解碼。</li>
+    <li><strong>看滿載、回繞與讀出順序。</strong>開啟 <a href="binary-logging.html#buffer">四格互動 queue</a>，重設後連續按五次「產生一筆」，再消費一筆、產生一筆。先猜第 6 筆放在哪格，再依序把佇列清空。</li>
+    <li><strong>用同一套問題讀工作程式。</strong>在核准的環境選一個事件，記下編碼函式如何定義 record 長度、接收端在哪裡檢查和消費，以及 enqueue 成功或失敗後誰負責 buffer。不把內部封包、trace 或程式碼放進本 repo。</li>
+  </ol>
+  <details><summary>Byte order 改反，為什麼不是 NEED_MORE？</summary><p><code>00 02</code> 按 little-endian 是 512，已超過 LG v1 的 32-byte 上限；即使現在只有兩個 payload bytes，也應直接回報 <code>INVALID</code>，而不是繼續等待。</p></details>
+  <details><summary>第 6 筆寫到 slot 0，會先讀到它嗎？</summary><p>不會。第 5 筆滿載被丟棄；第 1 筆出列後，第 6 筆寫回 slot 0，但 <code>tail</code> 指向 slot 1。後續出列依序為 2、3、4、6。slot 編號不是時間順序。</p></details>
+  <p>如果手上的輸出確實走 IP 網路，延伸練習是用 Wireshark 開啟公開或獲准的 capture：先展開 IP 與 TCP／UDP 欄位，在 Packet Details 選一個欄位，對照 Packet Bytes 高亮的位置。沒有對應 dissector 時，工具不一定知道你的 log record 格式。<a href="#ref-wireshark">[W]</a></p>
+</section>
+<section id="resources">
+  <div class="section-kicker">07 / OPEN LEARNING PATH</div>
+  <h2>先讀入門教材，遇到邊界再查規格。</h2>
+  <h3>封包、位元組與傳輸</h3>
+  <div class="resources">
+    <a id="ref-beej" href="https://beej.us/guide/bgnet/html/split/slightly-advanced-techniques.html"><span>B · BEEJ’S GUIDE TO NETWORK PROGRAMMING / 3.3 系列</span><h3>Serialization 與 framing ↗</h3><p>先看 §2.2 封裝與 §3.2 Byte Order；再用 §7.4–7.6 練 partial sends、序列化與長度前綴。</p></a>
+    <a id="ref-tcp" href="https://www.rfc-editor.org/rfc/rfc9293.html#section-2.2"><span>T · IETF / RFC 9293 (2022)</span><h3>TCP byte-stream 契約 ↗</h3><p>看 §2.2 分清應用程式看到的 stream 與網路上傳送的 TCP segment。</p></a>
+    <a id="ref-udp" href="https://www.rfc-editor.org/rfc/rfc768"><span>U · IETF / RFC 768 (1980)</span><h3>UDP header 與 length ↗</h3><p>讀 Format 與 Fields，核對 UDP Length 包含哪兩部分。</p></a>
+    <a id="ref-wireshark" href="https://www.wireshark.org/docs/wsug_html_chunked/ChUseMainWindowSection.html"><span>W · WIRESHARK USER’S GUIDE</span><h3>Packet Details / Packet Bytes ↗</h3><p>讀 §3.3 搭配操作；手冊版面可能隨工具版本變動。</p></a>
+  </div>
+  <h3>資料結構與容量</h3>
+  <div class="resources">
+    <a id="ref-ods" href="https://opendatastructures.org/ods-cpp/"><span>O · PAT MORIN / C++ EDITION 0.1G</span><h3>Open Data Structures ↗</h3><p>先讀 §2.3 ArrayQueue、§3.1 單向串列，再讀第 5 章雜湊表。用概念理解操作成本，不必先把 C++ 程式搬進 C。</p></a>
+    <a id="ref-opendsa" href="https://opendsax.cs.vt.edu/OpenDSA/Books/Everything/html/Queue.html"><span>Q · VIRGINIA TECH / OPEN DSA §9.12</span><h3>Queues ↗</h3><p>對照 FIFO、陣列繞回和滿空的表示方式。</p></a>
+    <a id="ref-ring" href="https://docs.kernel.org/5.15/core-api/circular-buffers.html"><span>R · LINUX KERNEL 5.15</span><h3>Circular Buffers ↗</h3><p>讀固定大小、head/tail 與跨尾端；文件的同步做法限定其 producer／consumer 假設，不直接等同 RTOS。</p></a>
+  </div>
+  <p class="caption">本章為公開資料的原創整理。TCP／UDP 用來說明傳輸差異，不假定你的 logging service 使用其中任一種；LG v1 不相容於任何廠商的封包格式。</p>
+</section>
