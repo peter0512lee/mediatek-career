@@ -20,7 +20,7 @@ class Page(HTMLParser):
                 self.links.append(attrs[key])
 
 pages = {p.resolve(): Page(p) for p in ROOT.glob('*.html')}
-assert len(pages) == 4
+assert len(pages) == 5
 for path, page in pages.items():
     assert '\ufffd' not in path.read_text(), (path, 'invalid UTF-8 replacement')
     for link in page.links:
@@ -32,4 +32,4 @@ for path, page in pages.items():
         assert target.is_file(), (path, 'missing file', link)
         if url.fragment:
             assert target in pages and unquote(url.fragment) in pages[target].ids, (path, 'missing anchor', link)
-print('site: PASS (4 pages, UTF-8, local assets, navigation, download links, anchors)')
+print(f'site: PASS ({len(pages)} pages, UTF-8, local assets, navigation, download links, anchors)')

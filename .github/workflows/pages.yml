@@ -50,7 +50,7 @@ jobs:
       - name: Prepare public website only
         run: |
           mkdir -p _site
-          cp index.html c-memory.html binary-logging.html debugging.html _site/
+          cp index.html c-memory.html embedded-systems.html binary-logging.html debugging.html _site/
           cp -R assets examples _site/
           touch _site/.nojekyll
       - uses: actions/upload-pages-artifact@v4

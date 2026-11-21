@@ -1,6 +1,6 @@
 # Engineering Fieldnotes
 
-給 AI Software 背景工程師的 Modem 學習知識庫。繁體中文，從系統背景走向 C、Binary Logging 與除錯。
+給 AI Software 背景工程師的 Modem 學習知識庫。繁體中文，從系統背景走向 C、嵌入式系統、Binary Logging 與除錯。
 
 網站：[Engineering Fieldnotes](https://peter0512lee.github.io/mediatek-career/)
 
@@ -8,8 +8,9 @@
 
 1. **Modem 基礎**（`index.html`）：AP / Modem、UE / RAN / Core、協定分層、5G SA 概念流程、名詞搜尋。
 2. **C 與記憶體**（`c-memory.html`）：編譯、pointer / length、ownership、生命週期、endianness、alignment、並行邊界、copy 實驗。
-3. **Binary Logging**（`binary-logging.html`）：教學格式 LG v1、互動 hex decoder、stream parsing、ring buffer、版本與時間。
-4. **Debugging 實作**（`debugging.html`）：證據與假設、排查矩陣、LLDB、sanitizers、錯誤注入與分析案例。
+3. **[嵌入式系統](embedded-systems.html)**：Cortex-M 啟動與記憶體配置、MMIO、周邊、ISR、DMA、RTOS，以及不用硬體的時序練習。
+4. **Binary Logging**（`binary-logging.html`）：教學格式 LG v1、互動 hex decoder、stream parsing、ring buffer、版本與時間。
+5. **Debugging 實作**（`debugging.html`）：證據與假設、排查矩陣、LLDB、sanitizers、錯誤注入與分析案例。
 
 每篇附公開來源、查核日期、實作與自我檢查。進度儲存在瀏覽器 localStorage，各章獨立。純靜態頁面，不傳送練習輸入。
 
@@ -18,6 +19,7 @@
 - 個人學習筆記，非 MediaTek 官方文件。不收錄內部程式碼、文件或 log。
 - ICD、MDM、MTF、DHL 的內部定義未確認，不猜測對應關係。
 - C 教材以 C11 為基準，使用 WG14 N1570 公開草案核對語言規則；另參考 LLVM、GCC、Linux、FreeRTOS 與 Zephyr 官方資料。
+- 嵌入式系統章節以 Cortex-M 與 Zephyr 3.7.0 教學，不代表 Modem 平台架構；原生模擬不能驗證真實硬體時序。
 - LG v1 是自訂練習格式，不相容於任何廠商 modem trace；沒有 checksum、壓縮或 crash-durability 保證。
 - Ring buffer 為單執行緒模型，不是可直接移植的 lock-free 實作。Host 測試不代表 firmware、ISR、DMA 或硬體效能已驗證。
 - 3GPP Release 16 用於基礎架構學習，實際平台與規範版本須另確認。
@@ -36,8 +38,8 @@ python3 -m http.server 8000
 瀏覽 http://localhost:8000 。也可直接開啟 `index.html`；file URL 的進度儲存行為依瀏覽器而異。
 
 - `content/modem.html`：第一篇原始頁面；build 會換成共用章節導覽。
-- `content/c-memory.html`、`content/binary-logging.html`、`content/debugging.html`：各章正文。
-- `tools/build_site.py`：共用頁面模板與路徑；輸出四個根目錄 HTML。
+- `content/c-memory.html`、`content/embedded-systems.html`、`content/binary-logging.html`、`content/debugging.html`：各章正文。
+- `tools/build_site.py`：共用頁面模板與路徑；輸出五個根目錄 HTML。
 - `assets/style.css`、`assets/app.js`、`assets/labs.js`：版面、進度、搜尋與互動練習。
 - `examples/`：C 程式與黑箱測試；網站也提供下載。
 
@@ -67,4 +69,4 @@ Memory 練習另編譯 `examples/memory_demo.c`。Sanitizer 支援依平台而�
 
 在 Settings → Pages 將 Source 設為 **GitHub Actions**。Push 至 `main` 會先執行網站與 C 範例驗證，再部署；PR 只驗證。Workflow 也可手動執行。
 
-僅四個根目錄 HTML、`assets/` 與 `examples/` 會發布；不打包 `.git`、build 產物或整個 repo。所有內部路徑為相對路徑，支援 repository Pages 子路徑。
+僅五個根目錄 HTML、`assets/` 與 `examples/` 會發布；不打包 `.git`、build 產物或整個 repo。所有內部路徑為相對路徑，支援 repository Pages 子路徑。

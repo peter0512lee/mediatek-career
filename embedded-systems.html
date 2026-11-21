@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="從開機、周邊到 RTOS，練習追蹤一筆事件何時發生、何時完成。"><title>嵌入式系統 · Engineering Fieldnotes</title><link rel="stylesheet" href="assets/style.css"><link rel="icon" href="assets/favicon.svg" type="image/svg+xml"><script src="assets/app.js" defer></script><script src="assets/labs.js" defer></script></head>
+<body data-chapter="embedded-systems"><a class="skip" href="#main">跳到主要內容</a><aside class="sidebar"><a class="brand" href="index.html"><span class="brand-icon">∿</span><span>FIELDNOTES<small>ENGINEERING KNOWLEDGE BASE</small></span></a><div class="sidebar-label">LEARNING PATH / 學習路徑</div><div class="chapter-nav" aria-label="學習主題"><a href="index.html" class=""><span>01</span>Modem 基礎</a><a href="c-memory.html" class=""><span>02</span>C 與記憶體</a><a href="embedded-systems.html" class="current" aria-current="page"><span>03</span>嵌入式系統</a><a href="binary-logging.html" class=""><span>04</span>Binary Logging</a><a href="debugging.html" class=""><span>05</span>Debugging 實作</a></div><div class="sidebar-label toc-label">本篇章節</div><nav aria-label="文章章節"><a href="#system-model"><span>01</span>先分清楚晶片、板子和 firmware。</a><a href="#boot-memory"><span>02</span>程式在進入 main 前就開始工作了。</a><a href="#peripherals"><span>03</span>讀寫暫存器，可能直接改變硬體狀態。</a><a href="#execution"><span>04</span>Polling、ISR 與 DMA 不是三種互斥的架構。</a><a href="#practice"><span>05</span>不用板子：找出哪一筆事件逾期。</a><a href="#simulator"><span>06</span>延伸實作：在 Linux 跑 Zephyr。</a><a href="#resources"><span>07</span>公開教材：先學觀念，再對照規格。</a></nav><div class="sidebar-footer">公開知識 · 可重現練習<br><a href="https://github.com/peter0512lee/mediatek-career">View repository ↗</a></div></aside><div class="shell"><header class="topbar"><span>知識庫 <span class="slash">/</span> 嵌入式系統</span><a href="#resources">公開參考資料 ↗</a></header><main id="main"><div class="eyebrow">CHAPTER 03 <span>LEARN BY BUILDING</span></div><h1>從開機到事件，<br>讀懂<em>韌體</em>。</h1><p class="lead">從開機、周邊到 RTOS，練習追蹤一筆事件何時發生、何時完成。</p><div class="meta"><span>入門 → 實作</span><span>約 25 分鐘閱讀</span><span>查核於 <time datetime="2026-11-21">2026.11.21</time></span></div><div class="note"><strong>本篇學習方式</strong>先讀概念，再做練習檢查理解。實作環境與適用範圍見各篇說明；公司平台與內部介面需另行確認。</div><section id="system-model">
+  <div class="section-kicker">01 / SYSTEM MODEL</div>
+  <h2>先分清楚晶片、板子和 firmware。</h2>
+  <p>嵌入式系統把運算放進有特定用途的裝置。寫 firmware 不只要讓輸出正確，還要知道它何時送達、可用多少 RAM、失敗後如何恢復。這一章用 Cortex-M 微控制器教觀念，不代表任何 Modem 的實際架構。<a href="#ref-ut">[UT]</a></p>
+  <div class="table-wrap"><table>
+    <thead><tr><th scope="col">你在看哪一層？</th><th scope="col">例子與文件</th></tr></thead>
+    <tbody>
+      <tr><td>CPU core</td><td>Cortex-M 描述核心與例外模型；用 Arm 文件查核心功能，例如中斷控制器 NVIC。</td></tr>
+      <tr><td>MCU / SoC</td><td>晶片整合 CPU、記憶體或周邊。用該型號的原廠手冊查 memory map、clock、UART 與 DMA；同屬 Cortex-M 不代表暫存器相同。</td></tr>
+      <tr><td>Board</td><td>用開發板的 schematic 查 LED、電源及接頭實際接到哪一根 pin；核心手冊不會告訴你。</td></tr>
+      <tr><td>Firmware</td><td>啟動碼和 driver 把晶片與板子設定好，應用程式才有可用的 timer、輸入與輸出。板級支援套件（BSP）可提供部分啟動與周邊設定。</td></tr>
+    </tbody>
+  </table></div>
+  <p class="caption">讀手冊的順序：核心行為查 Arm，暫存器查晶片原廠，接線查板級文件。<a href="#ref-arm">[ARM]</a> <a href="#ref-ti">[TI]</a></p>
+</section>
+<section id="boot-memory">
+  <div class="section-kicker">02 / BOOT &amp; MEMORY</div>
+  <h2>程式在進入 main 前就開始工作了。</h2>
+  <p>典型的 Cortex-M 開機流程：從 vector table 取得初始 stack pointer 與 reset handler，執行啟動碼和 C runtime 初始化，才進入 <code>main</code>。開機可能先經過 boot ROM 或 bootloader；實際初始化順序應看該平台的 startup code。<a href="#ref-startup">[START]</a></p>
+  <div class="table-wrap"><table>
+    <thead><tr><th scope="col">常見 section</th><th scope="col">典型 MCU 放法</th><th scope="col">對除錯有什麼用？</th></tr></thead>
+    <tbody>
+      <tr><td><code>.text</code> / <code>.rodata</code></td><td>程式碼與唯讀資料通常留在 Flash。</td><td>Flash 不夠時，先分辨體積來自程式碼還是常數。</td></tr>
+      <tr><td><code>.data</code></td><td>執行時放在 RAM；初值通常隨映像檔放在 Flash，啟動時複製到 RAM。</td><td>有初值的全域 buffer 可能同時消耗 Flash 與 RAM。</td></tr>
+      <tr><td><code>.bss</code></td><td>執行時占 RAM，典型啟動流程將該區清零。</td><td>映像檔小，不表示執行時的 RAM 用量小。</td></tr>
+    </tbody>
+  </table></div>
+  <p>Linker script 決定配置；map file 用來檢查實際位址與大小。別只加總上表：stack、heap、RTOS task stacks 與 DMA buffers 也可能占用 RAM。先用前一章的<a href="c-memory.html#lifetime">資料生命週期</a>判斷誰能讀寫，再用 map file 查資料放在哪裡。</p>
+</section>
+<section id="peripherals">
+  <div class="section-kicker">03 / PERIPHERALS &amp; MMIO</div>
+  <h2>讀寫暫存器，可能直接改變硬體狀態。</h2>
+  <p>Memory-mapped I/O（MMIO）把周邊暫存器映射到 CPU 可存取的位址。先看原廠手冊的 register width、reset value 和存取型態。例如有些旗標是 write-one-to-clear（W1C）：寫入 1 才清除指定 bit；用一般 <code>reg |= mask</code> 做 read-modify-write，可能把其他已是 1 的旗標也清掉。使用平台的暫存器定義與存取介面；<code>volatile</code> 並不能取代同步或平台要求的順序控制。<a href="#ref-arm">[ARM]</a> <a href="#ref-ti">[TI]</a></p>
+  <div class="table-wrap"><table>
+    <thead><tr><th scope="col">周邊</th><th scope="col">用途</th><th scope="col">第一次接線／除錯先確認</th></tr></thead>
+    <tbody>
+      <tr><td>GPIO</td><td>按鈕輸入、LED 輸出或切換到替代功能。</td><td>Pin mux、方向、pull-up/down、有效電位。</td></tr>
+      <tr><td>Timer</td><td>週期取樣、時間戳、量測脈波。</td><td>Clock source、prescaler、計數器寬度與回繞。</td></tr>
+      <tr><td>UART</td><td>非同步串列通訊，例如 debug console。</td><td>兩端 baud rate、資料位元、parity、stop bits 與訊號電位。</td></tr>
+      <tr><td>I²C / SPI</td><td>常用於 MCU 與板上感測器通訊。</td><td>I²C 查位址、pull-up 與 ACK；SPI 查 chip select、clock mode 與 bit order。<a href="#ref-i2c">[I²C]</a></td></tr>
+    </tbody>
+  </table></div>
+</section>
+<section id="execution">
+  <div class="section-kicker">04 / EXECUTION CONTEXT</div>
+  <h2>Polling、ISR 與 DMA 不是三種互斥的架構。</h2>
+  <ul>
+    <li><strong>Polling</strong>：程式定期讀狀態。若主迴圈常被其他工作卡住，實際檢查間隔會變長；短暫且未鎖存的訊號可能被漏掉。</li>
+    <li><strong>Interrupt / ISR</strong>：硬體事件觸發中斷，CPU 在允許時進入 interrupt service routine。依手冊處理中斷來源、記錄必要資訊，再把可延後的工作交給主迴圈或 task。等待時間不只取決於 ISR 長度，也受遮罩、優先權與其他中斷影響。<a href="#ref-ut">[UT]</a> <a href="#ref-arm">[ARM]</a></li>
+    <li><strong>DMA</strong>：受 CPU 設定後，由 DMA 控制器搬移資料，可再用中斷通知完成。若 driver 未複製資料，buffer 在 DMA 完成前不可失效，也不能被不當讀寫或重用；有 cache 的平台還要依 driver 契約處理一致性。<a href="#ref-ti">[TI]</a></li>
+  </ul>
+  <p><strong>Bare metal</strong> 可用主迴圈加 ISR；<strong>RTOS</strong> 可讓多個 task 各自等待事件，由 scheduler 在 ready tasks 中依規則挑選要執行的 task。以 FreeRTOS 為例，ISR 若要傳 queue，應使用適用的 <code>FromISR</code> API 並遵守該 port 的中斷優先權限制，不能在 ISR 阻塞等待。Queue 若存的是 pointer，入列只會複製 pointer 值，不會延長 payload 的生命週期。<a href="#ref-rtos">[RTOS]</a></p>
+  <div class="note"><strong>即時不等於跑得快。</strong>若要求事件發生後 2 ms 內一定處理完，就要說明可接受的最大延遲與適用負載；平均 0.3 ms 或改用 RTOS 都不能證明滿足期限。</div>
+</section>
+<section id="practice">
+  <div class="section-kicker">05 / TRACE A DEADLINE</div>
+  <h2>不用板子：找出哪一筆事件逾期。</h2>
+  <p>假設一個 timer 每 10 ms 觸發取樣。要求是從 timer 事件到 task 完成處理最多 2 ms，UART 將 log 送給主機則不算在內。下表時間都來自同一個單調計數器，且這段期間沒有回繞。</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th scope="col">序號</th><th scope="col">Timer 事件（µs）</th><th scope="col">進入 ISR（µs）</th><th scope="col">Task 完成（µs）</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>10,000</td><td>10,050</td><td>10,600</td></tr>
+      <tr><td>2</td><td>20,000</td><td>20,080</td><td>22,300</td></tr>
+      <tr><td>3</td><td>30,000</td><td>30,650</td><td>31,500</td></tr>
+    </tbody>
+  </table></div>
+  <details><summary>哪一筆逾期？中斷進入最慢的是同一筆嗎？</summary><p>第 2 筆端到端延遲為 2,300 µs，超過 2,000 µs；另外兩筆分別為 600 和 1,500 µs。ISR 進入延遲最長的是第 3 筆（650 µs），不是第 2 筆。不要用單一階段的最大值認定整條路徑的瓶頸。</p></details>
+  <details><summary>如何分辨是 ISR 太久、task 在等，還是 task 一直被搶占？</summary><p>先加「完成入列」與「task 取出」的同來源時間戳，分出入列前、入列到取出、取出到完成三段。要再區分 task 實際執行時間與被搶占的時間，用 scheduler trace 查 context switch。量測本身也有成本，避免在 ISR 同步印長字串。</p></details>
+  <details><summary>主機收到 log 的時間能代替哪一欄？</summary><p>不能直接代替任何一欄。主機時間還混入排隊、傳輸和主機排程，也可能與裝置使用不同時鐘。追溯事件時應保留裝置端時間戳與序號；另外記錄 queue 滿載時的丟棄計數。</p></details>
+  <p class="caption">這是合成資料與簡化模型，不是在驗證真實硬體最壞延遲。下一章<a href="binary-logging.html">Binary Logging</a>會把這些事件變成可傳輸與解析的 bytes。</p>
+</section>
+<section id="simulator">
+  <div class="section-kicker">06 / FIRST RTOS BUILD</div>
+  <h2>延伸實作：在 Linux 跑 Zephyr。</h2>
+  <p>不需要開發板。依 <a href="https://docs.zephyrproject.org/3.7.0/develop/getting_started/index.html">Zephyr 3.7.0 官方環境指南</a>準備 Linux 工具鏈、<code>west</code> 與 workspace；初始化 workspace 時在指南的 <code>west init</code> 指令加上 <code>--mr v3.7.0</code> 選定版本。進到 Zephyr 原始碼目錄，於 x86-64 Linux 執行：</p>
+  <pre><code>west build -b native_sim/native/64 -d build-native-sim samples/hello_world
+./build-native-sim/zephyr/zephyr.exe</code></pre>
+  <p>成功時 console 會出現 <code>Hello World!</code> 和目標名稱；即使檔名是 <code>.exe</code>，它仍是 Linux 執行檔。Kernel 進入 idle 後用 <kbd>Ctrl+C</kbd> 停止。這個 target 用來驗證建置與軟體行為，不模擬指定 MCU，也不能用來證明真實中斷延遲、UART 電氣特性或 DMA 正確性。<a href="#ref-zephyr">[Z]</a></p>
+</section>
+<section id="resources">
+  <div class="section-kicker">07 / PUBLIC LEARNING PATH</div>
+  <h2>公開教材：先學觀念，再對照規格。</h2>
+  <div class="resources">
+    <a id="ref-ut" href="https://embedded.ece.utexas.edu/"><span>UT · UNIVERSITY OF TEXAS AT AUSTIN</span><h3>Introduction to Embedded Systems ↗</h3><p>2022 教材。先讀第 1、3 章的系統與 GPIO，再讀第 5、6、9 章的狀態機、中斷與串列通訊；課程使用 TM4C123。</p></a>
+    <a id="ref-arm" href="https://arm-software.github.io/CMSIS_6/latest/Core/index.html"><span>ARM · CMSIS 6</span><h3>CMSIS-Core (Cortex-M) ↗</h3><p>查 core registers、NVIC 與 SysTick；從頁內的 Generic User Guides 選自己的 Cortex-M 型號。</p></a>
+    <a id="ref-startup" href="https://arm-software.github.io/CMSIS_6/latest/Core/startup_c_pg.html"><span>START · CMSIS 6</span><h3>Startup File ↗</h3><p>對照 Cortex-M vector table、reset handler 與 C runtime 的入口。</p></a>
+    <a id="ref-ti" href="https://www.ti.com/lit/ds/symlink/tm4c123gh6pm.pdf"><span>TI · SPMS376E (REV. E)</span><h3>TM4C123GH6PM Data Sheet ↗</h3><p>用同一顆課程晶片練查 memory map、GPIO、UART、µDMA 與各暫存器的存取屬性。</p></a>
+    <a id="ref-i2c" href="https://www.nxp.com/docs/en/user-guide/UM10204.pdf"><span>I²C · NXP UM10204 REV. 7.0</span><h3>I²C-bus Specification ↗</h3><p>讀第 3 章，對照 SDA / SCL、START / STOP、位址與 ACK。</p></a>
+    <a id="ref-rtos" href="https://github.com/FreeRTOS/FreeRTOS-Kernel-Book/blob/main/toc.md"><span>RTOS · FREERTOS KERNEL BOOK</span><h3>Mastering the FreeRTOS Real Time Kernel ↗</h3><p>依序讀第 4、5、7 章的 task、queue 與 interrupt；實作前核對所用 kernel 版本與 port。</p></a>
+    <a id="ref-zephyr" href="https://docs.zephyrproject.org/3.7.0/boards/native/native_sim/doc/index.html"><span>Z · ZEPHYR 3.7.0</span><h3>Native Simulator ↗</h3><p>查 Linux 相依性、32/64-bit target 與模擬時間的限制。</p></a>
+  </div>
+  <p class="caption">本篇為原創整理，未重製課程原文；CMSIS 與 FreeRTOS 連結會更新，遇到具體專案請改查對應版本。</p>
+</section>
+<div class="completion"><label><input type="checkbox" id="completed"> 我已理解本篇，並完成實作或自我檢查</label><span id="completion-status" role="status"></span></div><div class="page-links"><a href="c-memory.html">← C 與記憶體</a><a href="binary-logging.html">Binary Logging →</a></div><footer>ENGINEERING FIELDNOTES <span>個人學習筆記 · 公開資料整理 · 非 MediaTek 官方文件</span></footer></main></div></body></html>
