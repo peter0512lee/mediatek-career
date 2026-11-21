@@ -20,7 +20,7 @@ class Page(HTMLParser):
                 self.links.append(attrs[key])
 
 pages = {p.resolve(): Page(p) for p in ROOT.glob('*.html')}
-assert len(pages) == 5
+assert len(pages) == 6
 for path, page in pages.items():
     assert '\ufffd' not in path.read_text(), (path, 'invalid UTF-8 replacement')
     for link in page.links:

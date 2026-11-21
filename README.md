@@ -1,6 +1,6 @@
 # Engineering Fieldnotes
 
-給 AI Software 背景工程師的 Modem 學習知識庫。繁體中文，從系統背景走向 C、嵌入式系統、Binary Logging 與除錯。
+給 AI Software 背景工程師的 Modem 學習知識庫。繁體中文，從系統背景走向 C、嵌入式系統、RTOS、Binary Logging 與除錯。
 
 網站：[Engineering Fieldnotes](https://peter0512lee.github.io/mediatek-career/)
 
@@ -9,8 +9,9 @@
 1. **Modem 基礎**（`index.html`）：AP / Modem、UE / RAN / Core、協定分層、5G SA 概念流程、名詞搜尋。
 2. **C 與記憶體**（`c-memory.html`）：編譯、pointer / length、ownership、生命週期、endianness、alignment、並行邊界、copy 實驗。
 3. **[嵌入式系統](embedded-systems.html)**：Cortex-M 啟動與記憶體配置、MMIO、周邊、ISR、DMA、RTOS，以及不用硬體的時序練習。
-4. **Binary Logging**（`binary-logging.html`）：教學格式 LG v1、互動 hex decoder、stream parsing、ring buffer、版本與時間。
-5. **Debugging 實作**（`debugging.html`）：證據與假設、排查矩陣、LLDB、sanitizers、錯誤注入與分析案例。
+4. **[RTOS 進階](rtos-advanced.html)**：搶占與週期喚醒、優先權反轉、ISR 交接、反應時間分析、trace 與可執行的時序練習。
+5. **Binary Logging**（`binary-logging.html`）：教學格式 LG v1、互動 hex decoder、stream parsing、ring buffer、版本與時間。
+6. **Debugging 實作**（`debugging.html`）：證據與假設、排查矩陣、LLDB、sanitizers、錯誤注入與分析案例。
 
 每篇附公開來源、查核日期、實作與自我檢查。進度儲存在瀏覽器 localStorage，各章獨立。純靜態頁面，不傳送練習輸入。
 
@@ -20,6 +21,7 @@
 - ICD、MDM、MTF、DHL 的內部定義未確認，不猜測對應關係。
 - C 教材以 C11 為基準，使用 WG14 N1570 公開草案核對語言規則；另參考 LLVM、GCC、Linux、FreeRTOS 與 Zephyr 官方資料。
 - 嵌入式系統章節以 Cortex-M 與 Zephyr 3.7.0 教學，不代表 Modem 平台架構；原生模擬不能驗證真實硬體時序。
+- RTOS 進階章節以 FreeRTOS Kernel V11.2.0 與 Zephyr 3.7.0 對照 API；反應時間練習限定單核心、固定優先權、可搶占的模型。
 - LG v1 是自訂練習格式，不相容於任何廠商 modem trace；沒有 checksum、壓縮或 crash-durability 保證。
 - Ring buffer 為單執行緒模型，不是可直接移植的 lock-free 實作。Host 測試不代表 firmware、ISR、DMA 或硬體效能已驗證。
 - 3GPP Release 16 用於基礎架構學習，實際平台與規範版本須另確認。
@@ -38,10 +40,10 @@ python3 -m http.server 8000
 瀏覽 http://localhost:8000 。也可直接開啟 `index.html`；file URL 的進度儲存行為依瀏覽器而異。
 
 - `content/modem.html`：第一篇原始頁面；build 會換成共用章節導覽。
-- `content/c-memory.html`、`content/embedded-systems.html`、`content/binary-logging.html`、`content/debugging.html`：各章正文。
-- `tools/build_site.py`：共用頁面模板與路徑；輸出五個根目錄 HTML。
+- `content/c-memory.html`、`content/embedded-systems.html`、`content/rtos-advanced.html`、`content/binary-logging.html`、`content/debugging.html`：各章正文。
+- `tools/build_site.py`：共用頁面模板與路徑；輸出六個根目錄 HTML。
 - `assets/style.css`、`assets/app.js`、`assets/labs.js`：版面、進度、搜尋與互動練習。
-- `examples/`：C 程式與黑箱測試；網站也提供下載。
+- `examples/`：C 與 Python 練習、黑箱測試；網站也提供下載。
 
 請修改 `content/` 後重新產生根目錄 HTML，不要只修改產物。新增章節時同步更新 build script、link checker 與 workflow 的部署清單。
 
@@ -65,8 +67,12 @@ Memory 練習另編譯 `examples/memory_demo.c`。Sanitizer 支援依平台而�
 
 測試涵蓋正常與串接資料、所有非空截斷前綴、大小邊界、未知 ID、錯誤 magic／版本／level／schema、sequence wrap、ring 滿空與環繞。它們不是任意輸入安全性或真實硬體相容性的證明。
 
+## 執行 RTOS 時序練習
+
+不需開發板或 RTOS SDK。從 repo 根目錄執行 `python3 examples/rtos_response_time.py 300`，控制 task 的反應時間上界為 1,550 µs；將阻塞上界參數改成 `600`，則不能保證滿足 1,800 µs 期限。假設與手算見 [RTOS 進階實作](rtos-advanced.html#lab)。
+
 ## GitHub Pages
 
 在 Settings → Pages 將 Source 設為 **GitHub Actions**。Push 至 `main` 會先驗證網站與 C 範例並上傳網站產物，再由獨立的工作部署到 Pages；PR 只驗證。Workflow 也可手動執行。
 
-僅五個根目錄 HTML、`assets/` 與 `examples/` 會發布；不打包 `.git`、build 產物或整個 repo。所有內部路徑為相對路徑，支援 repository Pages 子路徑。
+僅六個根目錄 HTML、`assets/` 與 `examples/` 會發布；不打包 `.git`、build 產物或整個 repo。所有內部路徑為相對路徑，支援 repository Pages 子路徑。

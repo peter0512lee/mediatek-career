@@ -67,7 +67,7 @@
   <details><summary>哪一筆逾期？中斷進入最慢的是同一筆嗎？</summary><p>第 2 筆端到端延遲為 2,300 µs，超過 2,000 µs；另外兩筆分別為 600 和 1,500 µs。ISR 進入延遲最長的是第 3 筆（650 µs），不是第 2 筆。不要用單一階段的最大值認定整條路徑的瓶頸。</p></details>
   <details><summary>如何分辨是 ISR 太久、task 在等，還是 task 一直被搶占？</summary><p>先加「完成入列」與「task 取出」的同來源時間戳，分出入列前、入列到取出、取出到完成三段。要再區分 task 實際執行時間與被搶占的時間，用 scheduler trace 查 context switch。量測本身也有成本，避免在 ISR 同步印長字串。</p></details>
   <details><summary>主機收到 log 的時間能代替哪一欄？</summary><p>不能直接代替任何一欄。主機時間還混入排隊、傳輸和主機排程，也可能與裝置使用不同時鐘。追溯事件時應保留裝置端時間戳與序號；另外記錄 queue 滿載時的丟棄計數。</p></details>
-  <p class="caption">這是合成資料與簡化模型，不是在驗證真實硬體最壞延遲。下一章<a href="binary-logging.html">Binary Logging</a>會把這些事件變成可傳輸與解析的 bytes。</p>
+  <p class="caption">這是合成資料，不是在驗證真實硬體最壞延遲。接著用 <a href="rtos-advanced.html#response-time">RTOS 進階的反應時間分析</a>，分別估算阻塞與搶占對期限的影響。</p>
 </section>
 <section id="simulator">
   <div class="section-kicker">06 / FIRST RTOS BUILD</div>

@@ -37,7 +37,7 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           mkdir -p _site
-          cp index.html c-memory.html embedded-systems.html binary-logging.html debugging.html _site/
+          cp index.html c-memory.html embedded-systems.html rtos-advanced.html binary-logging.html debugging.html _site/
           cp -R assets examples _site/
           touch _site/.nojekyll
       - uses: actions/upload-pages-artifact@v5

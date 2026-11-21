@@ -1,0 +1,87 @@
+<section id="scheduling">
+  <div class="section-kicker">01 / SCHEDULE WHAT IS READY</div>
+  <h2>Ready 不等於已開始執行。</h2>
+  <p>接續<a href="embedded-systems.html#execution">嵌入式系統的 ISR、DMA 與 task 入門</a>。假設一個單核心系統：RX ISR 記錄事件，RX task 擷取資料，控制 task 產生結果，背景 logger 才負責輸出。對每個 job 分開記錄 <strong>release</strong>（本次工作可開始）、<strong>first run</strong> 和 <strong>finish</strong>。等 CPU、等鎖與真正使用 CPU 是三回事；如果工作在 release 前還卡在 DMA 或中斷遮罩，端到端期限也要算上那段時間。</p>
+  <p>FreeRTOS 啟用搶占時，單核心 scheduler 選最高優先權的可執行 task；同優先權是否按 tick 輪轉，看 <code>configUSE_TIME_SLICING</code>。高優先權 task 若在空迴圈等待事件，仍可能讓低優先權 task 沒機會跑；用可阻塞的等待介面，並定義 timeout 行為。<a href="#ref-freertos">[F]</a></p>
+  <p>固定週期工作可從上一個<strong>預定</strong>喚醒點加週期（FreeRTOS <code>xTaskDelayUntil()</code>），而非每次做完再相對延遲。即使按時變成 Ready，也可能晚一點才取得 CPU。<code>pdFALSE</code> 表示這次沒有延遲，不等同應用層判定 deadline miss；另用事件時間戳判斷，並決定過期工作要補跑、略過還是進入降級模式。<a href="#ref-delay">[D]</a></p>
+  <div class="note"><strong>不要照搬 priority 數字。</strong>FreeRTOS task 的數字越大，優先權越高；Cortex-M NVIC 的數字越小，中斷優先級越高；Zephyr thread 的數字越小，優先權越高，負值是 cooperative 優先權。Zephyr 3.7.0 的 <code>CONFIG_SCHED_DEADLINE</code> 只在靜態優先權相同時比較 deadline，不會把整個 scheduler 變成全域 EDF。<a href="#ref-freertos">[F]</a> <a href="#ref-irq">[I]</a> <a href="#ref-zephyr-sched">[Z]</a></div>
+</section>
+<section id="priority-inversion">
+  <div class="section-kicker">02 / RESOURCE CONTENTION</div>
+  <h2>低優先權的持鎖者，可以卡住高優先權工作。</h2>
+  <ol>
+    <li>低優先權 L 拿到共享裝置的鎖；高優先權 H 隨後需要同一把鎖，因此阻塞。</li>
+    <li>若沒有 priority inheritance，中優先權 M 可以搶占 L。M 雖然從未碰那把鎖，仍延長 H 的等待。</li>
+    <li>支援 priority inheritance 的 mutex 可暫時提升 L 的有效優先權，幫它早些釋放鎖。H 仍得等 L 完成必要的持鎖工作。</li>
+  </ol>
+  <p>FreeRTOS 使用簡化的 priority inheritance；同一 task 持有多把 mutex 時，可能在釋放全部 mutex 前仍保留已繼承的優先權。不要假設解開其中一把就會立即降回原優先權。Binary semaphore 沒有 mutex 的 ownership 和繼承語意，也不能代替 mutex 解決反轉。<a href="#ref-mutex">[M]</a></p>
+  <p>先縮短 critical section，把可移出的 I/O 和等待拿掉；必須拿多把鎖時，建立全域 lock order。繼承無法消除 deadlock，不能讓已被 I/O 阻塞的持鎖者立即執行，也不會自動給出可拿去做時序分析的 blocking 上界。</p>
+</section>
+<section id="isr-handoff">
+  <div class="section-kicker">03 / ISR TO THREAD HANDOFF</div>
+  <h2>先定義事件能不能合併，再選通知方式。</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th scope="col">需求</th><th scope="col">可用的方式</th><th scope="col">一定要定義的邊界</th></tr></thead>
+    <tbody>
+      <tr><td>通知一個 task 有工作待清</td><td>FreeRTOS direct-to-task notification。<a href="#ref-freertos">[F]</a></td><td>設 bit 會合併重複事件；若要知道發生幾次，就用計數語意並處理上限，不把 notification 當 payload FIFO。</td></tr>
+      <tr><td>保留個別事件與時間戳</td><td>有容量上限的 queue，放小型 descriptor。</td><td>滿載時怎麼處置？若採 drop-newest，要增加丟棄計數並處理未成功移交的 buffer；成功時只移交 API 契約承諾的內容。</td></tr>
+      <tr><td>保護 task 間的共享裝置</td><td>有 ownership 的 mutex。</td><td>哪個 task 釋放、最長持鎖多久、timeout 後怎麼恢復；ISR 不拿 mutex。</td></tr>
+      <tr><td>把非緊急工作移出 ISR</td><td>Dedicated worker，或 Zephyr workqueue。<a href="#ref-zephyr-work">[W]</a></td><td>同一 work item 尚在排隊時再次提交不會多排一筆；同一 workqueue 中，慢 handler 會推遲後面的工作。</td></tr>
+    </tbody>
+  </table></div>
+  <p>FreeRTOS Cortex-M 的 ISR 範例：先依周邊手冊取樣與處理中斷來源，再以 <code>xQueueSendFromISR()</code> 非阻塞入列，檢查成功或 queue full。<code>pxHigherPriorityTaskWoken</code> 使用呼叫端先設為 <code>pdFALSE</code> 的旗標；若變成 <code>pdTRUE</code>，依 port 規則在離開 ISR 前請求切換。只有落在該 port 允許範圍的 IRQ 才能呼叫 kernel API；對使用 <code>BASEPRI</code> 的 Cortex-M port，特別檢查 <code>configMAX_SYSCALL_INTERRUPT_PRIORITY</code>、NVIC priority grouping，以及 CMSIS 和寄存器使用的 priority 編碼。<a href="#ref-irq">[I]</a> <a href="#ref-queue">[Q]</a></p>
+  <p>決定 queue 傳的是值還是 pointer。若成功入列就轉移 DMA buffer ownership，producer 不再重用；若入列失敗，ownership 沒有改變。Consumer 要在讀取結束後歸還 buffer，不能只靠 <code>volatile</code> 或通知送出來推論 DMA 資料已安全可讀。<a href="c-memory.html#lifetime">複習生命週期</a>。</p>
+</section>
+<section id="response-time">
+  <div class="section-kicker">04 / RESPONSE-TIME ANALYSIS</div>
+  <h2>用最壞反應時間檢查 deadline。</h2>
+  <p>本例限定單核心、固定優先權且可搶占、沒有 release jitter、沒有額外自我暫停，且每個 task 的相對期限 <var>D</var> 不大於最小到達間隔 <var>T</var>。假設已有保守的執行時間上界 <var>C</var> 與資源阻塞上界 <var>B</var>。以下模型不計額外 ISR、context switch、cache 或 DMA 影響；不要套用到 SMP、尚未建模的等待或任意期限。<a href="#ref-rta">[R]</a></p>
+  <p>令 <var>R</var> 初值為 <var>C</var><sub>i</sub> + <var>B</var><sub>i</sub>，反覆更新。每個較高優先權的 task <var>j</var> 在長度 <var>R</var> 的窗內可占用 CPU 多次：</p>
+  <pre><code>R_next = C[i] + B[i] + sum(ceil(R / T[j]) * C[j] for j in higher_priority)</code></pre>
+  <p>若收斂且 <var>R</var> ≤ <var>D</var>，模型支持這個 task 能滿足期限；若迭代值先超過期限，就無法用這些參數證明滿足期限。若 <var>C</var>、<var>B</var> 是保守上界，超過不必然代表實際會逾期。CPU 平均使用率或一次量到的最快時間，不能取代這個檢查。</p>
+</section>
+<section id="lab">
+  <div class="section-kicker">05 / REPRODUCIBLE LAB</div>
+  <h2>不用板子：算出控制 task 的阻塞預算。</h2>
+  <p>時間一律用 µs；控制 task 的確切 blocking 上界先視為輸入，由更低優先權的共享資源工作造成。這個練習只回答控制 task 的期限是否有保證，不替整套系統定案。</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th scope="col">Task</th><th scope="col">優先權</th><th scope="col">C（µs）</th><th scope="col">T（µs）</th><th scope="col">D（µs）</th></tr></thead>
+    <tbody>
+      <tr><td>RX</td><td>高</td><td>300</td><td>1,000</td><td>1,000</td></tr>
+      <tr><td>控制</td><td>低於 RX</td><td>650</td><td>2,500</td><td>1,800</td></tr>
+    </tbody>
+  </table></div>
+  <p>用 Python 3 從 repo 根目錄執行，或下載 <a href="examples/rtos_response_time.py" download>rtos_response_time.py</a>。不需要 Zephyr SDK 或 FreeRTOS：</p>
+  <pre><code>python3 examples/rtos_response_time.py 0
+python3 examples/rtos_response_time.py 300
+python3 examples/rtos_response_time.py 600</code></pre>
+  <details><summary>為什麼加上 300 µs 阻塞，反應時間卻增加 600 µs？</summary><p>B = 0 時收斂於 950 µs；B = 300 時迭代為 950 → 1,250 → 1,550 µs，再收斂。窗長跨過 1,000 µs，就要多容納一個 RX job；增加的是 300 µs 阻塞加 300 µs 搶占。</p></details>
+  <details><summary>阻塞上界最多可以是多少？</summary><p>把 B 改為 550，會收斂於 1,800 µs，恰好達到期限；551 就超過。B = 600 時，第一次超過期限的迭代值為 1,850 µs。超過後程式停止更新，不把尚未收斂的數字標成完成時間。</p></details>
+</section>
+<section id="tracing">
+  <div class="section-kicker">06 / TRACE THE TARGET</div>
+  <h2>用 trace 拆出等待、阻塞與執行。</h2>
+  <ul>
+    <li><strong>對齊事件：</strong>用同一個單調時鐘記錄 ISR 進出、事件入列、task Ready／切入／切出、鎖等待／釋放與工作完成。帶上序號、task ID 和 queue 溢位計數；多核心另記 core ID，確認各核心時基是否能直接比較。</li>
+    <li><strong>找等待原因：</strong>Ready 到首次切入長，查當時執行的 task 與 ISR；blocked on lock 長，查 owner、鎖持有時間與搶占；queue 高水位和丟棄數上升，再比對 burst 和 consumer 是否被 I/O 拖慢。Trace 本身若丟事件，標記資料缺口，不從缺段定根因。</li>
+    <li><strong>同看 RAM：</strong>根據目標負載檢查 task stack、queue 容量與 pool 餘量。上游 FreeRTOS 的 stack high-water mark 是測到的歷史最少剩餘 stack 空間（以 stack words 計），不是已用 bytes；未跑到的最深 call path 仍未驗證。<a href="#ref-stack">[S]</a></li>
+  </ul>
+  <p>Zephyr 3.7.0 的 tracing 指南示範從 kernel hooks 選格式與傳輸。先用低成本的事件記錄重現高負載，並估計 instrumentation overhead；真機觀測到的最大值仍不等於已證明的 WCET。<a href="#ref-zephyr-trace">[T]</a> 下一章<a href="binary-logging.html">Binary Logging</a>討論如何保存與解析這些紀錄。</p>
+</section>
+<section id="resources">
+  <div class="section-kicker">07 / PUBLIC LEARNING PATH</div>
+  <h2>進階讀法：先找契約，再做時序分析。</h2>
+  <div class="resources">
+    <a id="ref-freertos" href="https://github.com/FreeRTOS/FreeRTOS-Kernel-Book/blob/main/toc.md"><span>F · FREERTOS KERNEL BOOK</span><h3>Mastering the FreeRTOS Real Time Kernel ↗</h3><p>按第 4、5、7、8、10 章讀排程、queue、ISR、共享資源與 task notifications。線上書會更新；本章 API 以 FreeRTOS Kernel V11.2.0 為例。</p></a>
+    <a id="ref-delay" href="https://docs.freertos.org/Documentation/02-Kernel/04-API-references/02-Task-control/03-xTaskDelayUntil"><span>D · FREERTOS API</span><h3>xTaskDelayUntil ↗</h3><p>核對預定喚醒點如何推進，以及沒有延遲時的回傳值。</p></a>
+    <a id="ref-mutex" href="https://en.freertos.org/Documentation/02-Kernel/02-Kernel-features/02-Queues-mutexes-and-semaphores/04-Mutexes"><span>M · FREERTOS KERNEL</span><h3>Mutexes ↗</h3><p>對照 ownership 與簡化 priority inheritance，特別是同時持有多把 mutex 的行為。</p></a>
+    <a id="ref-irq" href="https://www.freertos.org/Documentation/02-Kernel/03-Supported-devices/04-Demos/ARM-Cortex/RTOS-Cortex-M3-M4"><span>I · FREERTOS CORTEX-M PORT</span><h3>Running FreeRTOS on Cortex-M ↗</h3><p>先看 interrupt nesting、priority 欄位對齊及能呼叫 ISR-safe API 的範圍。</p></a>
+    <a id="ref-queue" href="https://www.freertos.org/Documentation/02-Kernel/04-API-references/06-Queues/04-xQueueSendFromISR"><span>Q · FREERTOS API</span><h3>xQueueSendFromISR ↗</h3><p>核對 queue item copy、滿載回傳值、以及喚醒較高優先權 task 的處理。</p></a>
+    <a id="ref-stack" href="https://docs.freertos.org/Documentation/02-Kernel/04-API-references/03-Task-utilities/04-uxTaskGetStackHighWaterMark"><span>S · FREERTOS API</span><h3>uxTaskGetStackHighWaterMark ↗</h3><p>確認回傳的單位、最少剩餘空間與需要的組態。</p></a>
+    <a id="ref-zephyr-sched" href="https://docs.zephyrproject.org/3.7.0/kernel/services/scheduling/index.html"><span>Z · ZEPHYR 3.7.0</span><h3>Scheduling ↗</h3><p>理解 reschedule points、cooperative／preemptive 與 deadline tie-break。</p></a>
+    <a id="ref-zephyr-work" href="https://docs.zephyrproject.org/3.7.0/kernel/services/threads/workqueue.html"><span>W · ZEPHYR 3.7.0</span><h3>Workqueue Threads ↗</h3><p>對照重複提交、handler 延遲和 work item 的生命週期。</p></a>
+    <a id="ref-zephyr-trace" href="https://docs.zephyrproject.org/3.7.0/services/tracing/index.html"><span>T · ZEPHYR 3.7.0</span><h3>Tracing ↗</h3><p>從 kernel hooks、Common Trace Format 與輸出 transport 開始。</p></a>
+    <a id="ref-rta" href="https://www-users.york.ac.uk/~rd17/papers/SingleProcessorSchedulingReview.pdf"><span>R · UNIVERSITY OF YORK / ETR 2013</span><h3>Fixed Priority and EDF Scheduling ↗</h3><p>Robert I. Davis；讀 §4.2 和 §5.1–5.2，再看 release jitter 或任意期限如何改變公式。</p></a>
+  </div>
+  <p class="caption">本章為公開資料的原創整理。對照 <a href="https://github.com/FreeRTOS/FreeRTOS-Kernel/blob/V11.2.0/include/task.h">FreeRTOS V11.2.0 的 API 宣告</a>；核心組態、vendor port、SoC 與實測上界以目標專案為準。計算練習不模擬 kernel 或目標硬體。</p>
+</section>
